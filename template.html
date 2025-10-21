@@ -1,0 +1,272 @@
+<html>
+
+<head>
+  <title>Car Inventory</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+
+    h1 {
+      font-size: 24px;
+    }
+
+    .filters {
+      margin-bottom: 20px;
+    }
+
+    .filters label {
+      margin-right: 10px;
+    }
+
+    .car {
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      padding: 15px;
+      margin-bottom: 20px;
+      display: flex;
+      gap: 20px;
+    }
+
+    .car img {
+      width: 300px;
+      height: auto;
+      border-radius: 8px;
+      object-fit: contain;
+    }
+
+    .info {
+      flex-grow: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .title {
+      font-size: 20px;
+      font-weight: bold;
+    }
+
+    .price {
+      font-size: 28px;
+      font-weight: bold;
+      color: #007BFF;
+      vertical-align: middle;
+    }
+
+    .priceHistory {
+      vertical-align: middle;
+    }
+
+    .miles {
+      font-size: 24px;
+      font-weight: bold;
+      color: #333;
+    }
+
+    .source {
+      color: #666;
+    }
+
+    textarea {
+      width: 100%;
+      height: 80px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      padding: 8px;
+      resize: vertical;
+    }
+  </style>
+</head>
+
+<body>
+  <h1><span id="totalCount">0</span> Cars</h1>
+  <p>Created: <span id="createdAt"></span> <span id="diff"></span></p>
+
+  <div class="filters">
+    <label>
+      Title:
+      <input type="text" id="filterTitle" placeholder="e.g. GLC" oninput="applyFilters()" />
+    </label>
+    <label>
+      Max Price:
+      <input type="number" id="filterMaxPrice" placeholder="e.g. 50000" oninput="applyFilters()" />
+    </label>
+    <label>
+      Max days in stock:
+      <input type="number" id="filterMaxDaysInStock" placeholder="e.g. 7" oninput="applyFilters()" />
+    </label>
+    <label>
+      Year:
+      <select id="filterYear" oninput="applyFilters()">
+        <option value="">All</option>
+      </select>
+    </label>
+    <label>
+      Province:
+      <select id="filterProvince" oninput="applyFilters()">
+        <option value="">All</option>
+      </select>
+    </label>
+    <label id="filterAddedOnlyContainer">
+      <input type="checkbox" id="filterAddedOnly" oninput="applyFilters()" /> Show added only
+    </label>
+    <button onclick="resetFilters()">Reset</button>
+    <button onclick="exportMeta()">Export Notes</button>
+    <button onclick="importMeta()">Import Notes</button>
+  </div>
+
+  <div id="results"></div>
+
+  <script>
+    const inventory = "<--INVENTORY-->";
+
+    const createdAt = new Date(inventory.timestamp);
+    document.getElementById("createdAt").textContent = `${createdAt.toDateString()}, ${createdAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+    document.getElementById("diff").textContent = inventory.diff ? `(Added: ${inventory.diff.added.length} Removed: ${inventory.diff.removed.length})` : "";
+
+    [...new Set(inventory.cars.map(item => item.year))].sort().reverse().forEach(year => {
+      const option = document.createElement("option");
+      option.value = year;
+      option.textContent = year;
+      document.getElementById("filterYear").appendChild(option);
+    });
+
+    [...new Set(inventory.cars.map(item => item.province))].sort().forEach(province => {
+      const option = document.createElement("option");
+      option.value = province;
+      option.textContent = province;
+      document.getElementById("filterProvince").appendChild(option);
+    });
+
+    if (!inventory.diff) {
+      document.getElementById("filterAddedOnlyContainer").style.display = "none";
+    }
+
+    function getMeta() {
+      return JSON.parse(localStorage.getItem("carMeta") || "{}");
+    }
+
+    function saveMeta(meta) {
+      localStorage.setItem("carMeta", JSON.stringify(meta));
+    }
+
+    function mergeMeta(newMeta) {
+      const existing = getMeta();
+      const merged = { ...existing, ...newMeta };
+      saveMeta(merged);
+    }
+
+    function render(cars) {
+      const container = document.getElementById("results");
+      container.innerHTML = "";
+      document.getElementById("totalCount").textContent = cars.length;
+
+      const meta = getMeta();
+
+      cars.forEach(car => {
+        const div = document.createElement("div");
+        div.className = "car";
+        const metaKey = car.vin || car.link || car.title;
+        const noteText = meta[metaKey]?.notes ?? "";
+        const priceHistory = car.priceHistory?.length > 0 ? `← ${car.priceHistory.slice(0, -1).reverse().map(p => `$${p.toLocaleString()}`).join(" ← ")}` : "";
+
+        div.innerHTML = `
+          <img loading="lazy" src="${car.image}" alt="Car Image" />
+          <div class="info">
+            <div class="title"><a href="${car.link || "#"}" target="_blank">${car.title || ""}</a></div>
+            <div>
+              <span class="price">$${car.price ? car.price.toLocaleString() : "N/A"}</span>
+              <span class="priceHistory">${priceHistory}</span>
+            </div>
+            <div class="miles">${car.mileage ? car.mileage.toLocaleString() : "N/A"} km</div>
+            <div>Days in stock: ${car.days_in_stock || ""} | Year: ${car.year || ""} | Model: ${car.model || ""} | Trim: ${car.trim || ""} | Color: ${car.color || ""} | VIN: ${car.vin || ""}</div>
+            <div class="source">${car.source}, ${car.province}</div>
+            <div><textarea id="note-${metaKey}" placeholder="Add your notes here...">${noteText}</textarea></div>
+          </div>
+        `;
+
+        // Attach note saving logic
+        setTimeout(() => {
+          const textarea = div.querySelector("textarea");
+          textarea.addEventListener("input", e => {
+            const meta = getMeta();
+            meta[metaKey] = { ...meta[metaKey], notes: e.target.value };
+            saveMeta(meta);
+          });
+        }, 0);
+
+        container.appendChild(div);
+      });
+    }
+
+    function applyFilters() {
+      const title = document.getElementById("filterTitle").value.toLowerCase();
+      const maxPrice = document.getElementById("filterMaxPrice").value;
+      const maxDaysInStock = document.getElementById("filterMaxDaysInStock").value;
+      const year = document.getElementById("filterYear").value;
+      const province = document.getElementById("filterProvince").value;
+      const addedOnly = document.getElementById("filterAddedOnly").checked;
+
+      let filtered = inventory.cars;
+
+      if (title) filtered = filtered.filter(v => title.split(" ").every(word => v.title?.toLowerCase().includes(word.toLowerCase())));
+      if (maxPrice) filtered = filtered.filter(v => v.price && v.price <= parseInt(maxPrice));
+      if (maxDaysInStock) filtered = filtered.filter(v => v.days_in_stock && v.days_in_stock <= parseInt(maxDaysInStock));
+      if (year && year != "") filtered = filtered.filter(v => v.year == year);
+      if (province && province != "") filtered = filtered.filter(v => v.province.toLowerCase() == province.toLowerCase());
+      if (addedOnly) filtered = filtered.filter(v => inventory.diff?.added.includes(v.vin));
+
+      render(filtered);
+    }
+
+    function resetFilters() {
+      document.getElementById("filterTitle").value = "";
+      document.getElementById("filterMaxPrice").value = "";
+      document.getElementById("filterMaxDaysInStock").value = "";
+      document.getElementById("filterYear").value = "";
+      document.getElementById("filterProvince").value = "";
+      document.getElementById("filterAddedOnly").checked = false;
+      render(inventory.cars);
+    }
+
+    function exportMeta() {
+      const meta = getMeta();
+      const blob = new Blob([JSON.stringify(meta, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "car-meta.json";
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function importMeta() {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".json";
+      input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+          const text = await file.text();
+          const data = JSON.parse(text);
+          mergeMeta(data);
+          applyFilters();
+          alert("Notes imported successfully!");
+        } catch (err) {
+          alert("Invalid JSON file or import failed.");
+          console.error(err);
+        }
+      };
+      input.click();
+    }
+
+    window.addEventListener("load", async () => {
+      render(inventory.cars);
+    });
+  </script>
+</body>
+
+</html>
